@@ -1,0 +1,8 @@
+/Users/nonggia/workspace/code/for-duck/iceberg/iceberg-common/src/test/java/org/apache/gravitino/catalog/lakehouse/iceberg/TestIcebergPropertiesUtils.java
+/Users/nonggia/workspace/code/for-duck/iceberg/iceberg-common/src/test/java/org/apache/gravitino/iceberg/common/TestIcebergConfig.java
+/Users/nonggia/workspace/code/for-duck/iceberg/iceberg-common/src/test/java/org/apache/gravitino/iceberg/common/cache/TestLocalMetadataCache.java
+/Users/nonggia/workspace/code/for-duck/iceberg/iceberg-common/src/test/java/org/apache/gravitino/iceberg/common/utils/CustomCatalogForTest.java
+/Users/nonggia/workspace/code/for-duck/iceberg/iceberg-common/src/test/java/org/apache/gravitino/iceberg/common/utils/TestCaffeineSchedulerExtractorUtils.java
+/Users/nonggia/workspace/code/for-duck/iceberg/iceberg-common/src/test/java/org/apache/gravitino/iceberg/common/utils/TestIcebergCatalogUtil.java
+/Users/nonggia/workspace/code/for-duck/iceberg/iceberg-common/src/test/java/org/apache/iceberg/jdbc/TestJdbcCatalogWithMetadataLocationSupport.java
+/Users/nonggia/workspace/code/for-duck/iceberg/iceberg-common/src/test/java/org/apache/iceberg/memory/TestMemoryCatalogWithMetadataLocationSupport.java
