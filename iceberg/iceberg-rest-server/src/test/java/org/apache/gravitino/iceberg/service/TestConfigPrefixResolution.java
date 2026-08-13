@@ -19,11 +19,17 @@
 package org.apache.gravitino.iceberg.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 import org.apache.gravitino.iceberg.common.IcebergConfig;
+import org.apache.gravitino.iceberg.service.provider.IcebergConfigProvider;
+import org.apache.gravitino.iceberg.service.provider.StaticIcebergConfigProvider;
+import org.apache.gravitino.iceberg.service.spring.IcebergBeanConfig;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.env.MockEnvironment;
 
 /**
  * Verifies that config prefix stripping works correctly: properties using the {@code
@@ -41,8 +47,20 @@ class TestConfigPrefixResolution {
 
   @Test
   void testIcebergConfigReadsPrefixedCatalogBackend() {
+    // Manual prefix-stripping path (system-property style).
     Map<String, String> props = new HashMap<>();
     props.put(IcebergConfig.ICEBERG_CONFIG_PREFIX + "catalog-backend", "jdbc");
+
+    // Environment-binder path (application.properties style).
+    MockEnvironment environment = new MockEnvironment();
+    environment.setProperty("gravitino.iceberg-rest.catalog.iceberg_catalog.catalog-backend", "jdbc");
+    environment.setProperty(
+        "gravitino.iceberg-rest.catalog.iceberg_catalog.uri",
+        "jdbc:postgresql://localhost/test");
+    environment.setProperty("gravitino.iceberg-rest.extension-packages", "a,b,c,d");
+    environment.setProperty("server.port", "9001");
+
+    Properties properties = new IcebergBeanConfig().icebergProperties(environment);
 
     Map<String, String> stripped = new HashMap<>();
     props.forEach(
@@ -55,6 +73,21 @@ class TestConfigPrefixResolution {
         });
     IcebergConfig config = new IcebergConfig(stripped);
     assertEquals("jdbc", config.get(IcebergConfig.CATALOG_BACKEND));
+
+    assertEquals(
+        "jdbc:postgresql://localhost/test",
+        properties.getProperty("catalog.iceberg_catalog.uri"));
+    assertEquals("a,b,c,d", properties.getProperty("extension-packages"));
+    assertFalse(properties.containsKey("server.port"));
+
+    IcebergConfigProvider provider = new StaticIcebergConfigProvider();
+    Map<String, String> configMap = new HashMap<>();
+    properties.forEach((k, v) -> configMap.put(String.valueOf(k), String.valueOf(v)));
+    provider.initialize(configMap);
+    IcebergConfig catalogConfig = provider.getIcebergCatalogConfig("iceberg_catalog").orElseThrow();
+    assertEquals("jdbc", catalogConfig.get(IcebergConfig.CATALOG_BACKEND));
+    assertEquals(
+        "jdbc:postgresql://localhost/test", catalogConfig.get(IcebergConfig.CATALOG_URI));
   }
 
   @Test

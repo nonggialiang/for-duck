@@ -22,6 +22,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import jakarta.servlet.http.HttpServletRequest;
+import java.util.Collections;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,10 +54,14 @@ import org.apache.gravitino.listener.EventListenerManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
+import org.springframework.web.filter.CommonsRequestLoggingFilter;
 
 /**
  * Central Spring configuration that replaces the HK2 {@code AbstractBinder} previously used in
@@ -76,25 +83,84 @@ public class IcebergBeanConfig {
   private static final Logger LOG = LoggerFactory.getLogger(IcebergBeanConfig.class);
 
   /**
-   * Loads properties from system properties, stripping the {@code gravitino.iceberg-rest.} prefix
-   * so that both {@link IcebergConfig} entries and Spring Boot {@code server.*} entries can be read
-   * correctly.
+   * Loads Iceberg properties from the Spring Boot {@link Environment} and strips the {@code
+   * gravitino.iceberg-rest.} prefix so that {@link IcebergConfig} entries can be read correctly.
+   * Nested maps and lists from the relaxed binder are flattened into dotted keys.
    */
   @Bean
   @Primary
-  public Properties icebergProperties() {
-    Properties sysProps = System.getProperties();
-    String prefix = IcebergConfig.ICEBERG_CONFIG_PREFIX;
+  public Properties icebergProperties(Environment environment) {
+    Binder binder = Binder.get(environment);
+    Map<String, Object> bound =
+        binder
+            .bind("gravitino.iceberg-rest", Bindable.mapOf(String.class, Object.class))
+            .orElseGet(Collections::emptyMap);
     Properties result = new Properties();
-    for (String name : sysProps.stringPropertyNames()) {
-      String value = sysProps.getProperty(name);
-      if (name.startsWith(prefix)) {
-        result.setProperty(name.substring(prefix.length()), value);
-      } else {
-        result.setProperty(name, value);
+    flattenProperties("", bound, result);
+    return result;
+  }
+
+  /**
+   * Request logging filter; the Iceberg authentication filter is registered ahead of this one so
+   * that authentication runs first.
+   */
+  @Bean
+  public CommonsRequestLoggingFilter requestLoggingFilter() {
+    CommonsRequestLoggingFilter filter =
+        new CommonsRequestLoggingFilter() {
+          @Override
+          protected boolean shouldLog(HttpServletRequest request) {
+            return LOG.isInfoEnabled();
+          }
+
+          @Override
+          protected void beforeRequest(HttpServletRequest request, String message) {
+            LOG.info(message + ", headers=" + headersToString(request));
+          }
+        };
+    filter.setIncludeClientInfo(true);
+    filter.setIncludeQueryString(true);
+    filter.setIncludePayload(true);
+    filter.setIncludeHeaders(false);
+    filter.setMaxPayloadLength(10000);
+    filter.setAfterMessagePrefix("After request [");
+    filter.setBeforeMessagePrefix("Before request [");
+    filter.setBeforeMessageSuffix("]");
+    filter.setAfterMessageSuffix("]");
+    return filter;
+  }
+
+  private static String headersToString(HttpServletRequest request) {
+    Enumeration<String> headerNames = request.getHeaderNames();
+    if (headerNames == null) {
+      return "{}";
+    }
+    Map<String, List<String>> headers = new HashMap<>();
+    while (headerNames.hasMoreElements()) {
+      String headerName = headerNames.nextElement();
+      headers.put(headerName, Collections.list(request.getHeaders(headerName)));
+    }
+    return headers.toString();
+  }
+
+  @SuppressWarnings("unchecked")
+  private static void flattenProperties(String prefix, Map<String, Object> source, Properties target) {
+    for (Map.Entry<String, Object> entry : source.entrySet()) {
+      String key = prefix.isEmpty() ? entry.getKey() : prefix + "." + entry.getKey();
+      Object value = entry.getValue();
+      if (value instanceof Map) {
+        flattenProperties(key, (Map<String, Object>) value, target);
+      } else if (value instanceof List<?>) {
+        target.setProperty(
+            key,
+            ((List<?>) value).stream()
+                .map(Object::toString)
+                .reduce((a, b) -> a + "," + b)
+                .orElse(""));
+      } else if (value != null) {
+        target.setProperty(key, String.valueOf(value));
       }
     }
-    return result;
   }
 
   @Bean

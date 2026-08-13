@@ -33,6 +33,7 @@
     <modules>
         <module>iceberg-common</module>
         <module>iceberg-rest-server</module>
+        <module>cust-conf-advisor</module>
     </modules>
 
     <properties>
@@ -149,6 +150,16 @@
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>
                 <artifactId>iam-policy-builder</artifactId>
+                <version>${awssdk.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>s3</artifactId>
+                <version>${awssdk.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>kms</artifactId>
                 <version>${awssdk.version}</version>
             </dependency>
 
@@ -397,6 +408,11 @@
                             </path>
                         </annotationProcessorPaths>
                     </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>${spring-boot.version}</version>
                 </plugin>
             </plugins>
         </pluginManagement>
