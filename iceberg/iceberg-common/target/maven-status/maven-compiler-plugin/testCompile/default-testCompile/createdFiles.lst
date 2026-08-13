@@ -1,8 +1,0 @@
-org/apache/gravitino/iceberg/common/cache/TestLocalMetadataCache.class
-org/apache/iceberg/memory/TestMemoryCatalogWithMetadataLocationSupport.class
-org/apache/gravitino/iceberg/common/utils/CustomCatalogForTest.class
-org/apache/iceberg/jdbc/TestJdbcCatalogWithMetadataLocationSupport.class
-org/apache/gravitino/iceberg/common/utils/TestCaffeineSchedulerExtractorUtils.class
-org/apache/gravitino/iceberg/common/TestIcebergConfig.class
-org/apache/gravitino/catalog/lakehouse/iceberg/TestIcebergPropertiesUtils.class
-org/apache/gravitino/iceberg/common/utils/TestIcebergCatalogUtil.class
