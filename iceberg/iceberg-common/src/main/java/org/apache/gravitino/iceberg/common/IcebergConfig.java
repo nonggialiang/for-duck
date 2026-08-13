@@ -286,6 +286,23 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .longConf()
           .createWithDefault(2000L);
 
+  /**
+   * The authenticators the Iceberg REST server uses, in priority order. Built-in aliases are
+   * {@code simple} and {@code oauth}; a fully qualified class name implementing {@code
+   * Authenticator} is also accepted. {@code kerberos} is rejected at startup.
+   */
+  public static final ConfigEntry<List<String>> AUTHENTICATORS =
+      new ConfigBuilder("authenticators")
+          .doc("The authenticators the Iceberg REST server uses, separated by commas")
+          .version(ConfigConstants.VERSION_1_2_0)
+          .stringConf()
+          .toSequence()
+          .checkValue(
+              valueList ->
+                  valueList != null && valueList.stream().allMatch(StringUtils::isNotBlank),
+              ConfigConstants.NOT_BLANK_ERROR_MSG)
+          .createWithDefault(Collections.singletonList("simple"));
+
   public String getJdbcDriver() {
     return get(JDBC_DRIVER);
   }

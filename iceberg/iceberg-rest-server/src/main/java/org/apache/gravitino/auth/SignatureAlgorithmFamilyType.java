@@ -18,20 +18,9 @@
  */
 package org.apache.gravitino.auth;
 
-public final class AuthConstants {
-
-  private AuthConstants() {}
-
-  public static final String HTTP_HEADER_AUTHORIZATION = "Authorization";
-  public static final String AUTHORIZATION_BEARER_HEADER = "Bearer ";
-  public static final String AUTHORIZATION_BASIC_HEADER = "Basic ";
-  public static final String HTTP_CHALLENGE_HEADER = "WWW-Authenticate";
-  public static final String ANONYMOUS_USER = "anonymous";
-  public static final String AUTHENTICATED_PRINCIPAL_ATTRIBUTE_NAME = "gravitino_authenticated_principal";
-
-  /**
-   * HTTP header carrying the delegated access user. When present, authorization runs against this
-   * delegated user while the authenticated requester identity is preserved for auditing.
-   */
-  public static final String ICEBERG_ACCESS_DELEGATOR_HEADER = "X-Iceberg-Access-Delegator";
+/** Represents the family of a JWT signature algorithm. */
+public enum SignatureAlgorithmFamilyType {
+  HMAC,
+  RSA,
+  ECDSA
 }

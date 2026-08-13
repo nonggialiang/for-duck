@@ -34,6 +34,8 @@ public class IcebergRequestContext {
 
   private final String catalogName;
   private final String userName;
+  private final String requesterUserName;
+  private final String delegatedUserName;
   private final String remoteHostName;
   private final Map<String, String> httpHeaders;
   private final boolean requestCredentialVending;
@@ -61,7 +63,11 @@ public class IcebergRequestContext {
     this.remoteHostName = httpRequest.getRemoteHost();
     this.httpHeaders = IcebergRESTUtils.getHttpHeaders(httpRequest);
     this.catalogName = catalogName;
+    // Effective (delegator-aware) user drives authorization; keep requester and delegated user
+    // explicitly for audit/listeners.
     this.userName = PrincipalUtils.getCurrentUserName();
+    this.requesterUserName = PrincipalUtils.getCurrentRequesterUserName();
+    this.delegatedUserName = PrincipalUtils.getDelegatedUserName().orElse(null);
     this.requestCredentialVending = requestCredentialVending;
   }
 
@@ -77,10 +83,33 @@ public class IcebergRequestContext {
   /**
    * Returns the username of the HTTP client.
    *
+   * <p>This is the <em>effective</em> user (the delegated user when {@code
+   * X-Iceberg-Access-Delegator} is present, otherwise the authenticated requester).
+   *
    * @return The username.
    */
   public String userName() {
     return userName;
+  }
+
+  /**
+   * Returns the authenticated requester user name, regardless of whether a delegated user is
+   * present. Useful for auditing.
+   *
+   * @return The requester user name.
+   */
+  public String requesterUserName() {
+    return requesterUserName;
+  }
+
+  /**
+   * Returns the delegated user name when {@code X-Iceberg-Access-Delegator} was present, otherwise
+   * {@code null}.
+   *
+   * @return The delegated user name, or {@code null} if no delegation was requested.
+   */
+  public String delegatedUserName() {
+    return delegatedUserName;
   }
 
   /**

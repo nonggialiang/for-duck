@@ -18,20 +18,22 @@
  */
 package org.apache.gravitino.auth;
 
-public final class AuthConstants {
+import java.security.Principal;
 
-  private AuthConstants() {}
-
-  public static final String HTTP_HEADER_AUTHORIZATION = "Authorization";
-  public static final String AUTHORIZATION_BEARER_HEADER = "Bearer ";
-  public static final String AUTHORIZATION_BASIC_HEADER = "Basic ";
-  public static final String HTTP_CHALLENGE_HEADER = "WWW-Authenticate";
-  public static final String ANONYMOUS_USER = "anonymous";
-  public static final String AUTHENTICATED_PRINCIPAL_ATTRIBUTE_NAME = "gravitino_authenticated_principal";
+/**
+ * Interface for mapping authenticated principals to user identities.
+ *
+ * <p>Implementations should be thread-safe as they may be shared across multiple authentication
+ * requests.
+ */
+public interface PrincipalMapper {
 
   /**
-   * HTTP header carrying the delegated access user. When present, authorization runs against this
-   * delegated user while the authenticated requester identity is preserved for auditing.
+   * Maps a principal string to a {@link Principal}.
+   *
+   * @param principal the principal string to map (e.g. {@code user@company.com})
+   * @return a {@link Principal} containing the mapped username
+   * @throws IllegalArgumentException if the principal cannot be mapped
    */
-  public static final String ICEBERG_ACCESS_DELEGATOR_HEADER = "X-Iceberg-Access-Delegator";
+  Principal map(String principal);
 }

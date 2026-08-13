@@ -113,6 +113,12 @@
             <artifactId>jjwt-gson</artifactId>
         </dependency>
 
+        <!-- ==================== Nimbus JOSE+JWT (JWKS validation) ==================== -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+        </dependency>
+
         <!-- ==================== Metrics ==================== -->
         <dependency>
             <groupId>io.dropwizard.metrics</groupId>

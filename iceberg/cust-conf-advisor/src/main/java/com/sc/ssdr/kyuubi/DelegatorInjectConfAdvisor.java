@@ -29,7 +29,11 @@ import org.slf4j.LoggerFactory;
 
 public class DelegatorInjectConfAdvisor implements SessionConfAdvisor {
   private static final Logger LOG = LoggerFactory.getLogger(DelegatorInjectConfAdvisor.class);
-  private static final Pattern CATALOG_LIST = Pattern.compile("^[^,]+(\\s*,\\s*[^,]+)*$");
+  // Catalog names become `spark.sql.catalog.<name>.*` config keys, so they must not contain
+  // characters (dots, commas, whitespace) that would make those keys ambiguous. Allowed: letters,
+  // digits, underscore, hyphen, starting with a letter or underscore.
+  private static final Pattern CATALOG_LIST =
+      Pattern.compile("^[A-Za-z_][A-Za-z0-9_-]*(\\s*,\\s*[A-Za-z_][A-Za-z0-9_-]*)*$");
   private static final String DELEGATOR_INJECT_CATALOGS =
       "kyuubi.session.delegator.inject.catalogs";
 

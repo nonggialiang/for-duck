@@ -49,6 +49,8 @@ import org.apache.gravitino.iceberg.service.dispatcher.IcebergViewOperationExecu
 import org.apache.gravitino.iceberg.service.metrics.IcebergMetricsManager;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProvider;
 import org.apache.gravitino.iceberg.service.provider.StaticIcebergConfigProvider;
+import org.apache.gravitino.iceberg.service.authentication.ServerAuthenticator;
+import org.apache.gravitino.iceberg.service.IcebergAuthenticationFilter;
 import org.apache.gravitino.listener.EventBus;
 import org.apache.gravitino.listener.EventListenerManager;
 import org.slf4j.Logger;
@@ -56,6 +58,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
@@ -128,6 +131,30 @@ public class IcebergBeanConfig {
     filter.setBeforeMessageSuffix("]");
     filter.setAfterMessageSuffix("]");
     return filter;
+  }
+
+  /** Builds and initializes the configured authenticators from {@link IcebergConfig}. */
+  @Bean
+  public ServerAuthenticator serverAuthenticator(IcebergConfig icebergConfig) {
+    return new ServerAuthenticator(icebergConfig);
+  }
+
+  /**
+   * Registers the {@link IcebergAuthenticationFilter} ahead of the {@link CommonsRequestLoggingFilter}
+   * so that authentication and {@code X-Iceberg-Access-Delegator} capture run before request logging,
+   * controllers, request-context creation, and authorization AOP.
+   */
+  @Bean
+  public FilterRegistrationBean<IcebergAuthenticationFilter> icebergAuthenticationFilter(
+      ServerAuthenticator serverAuthenticator) {
+    IcebergAuthenticationFilter filter =
+        new IcebergAuthenticationFilter(serverAuthenticator.authenticators());
+    FilterRegistrationBean<IcebergAuthenticationFilter> registration =
+        new FilterRegistrationBean<>(filter);
+    registration.addUrlPatterns("/v1/*");
+    registration.setOrder(Integer.MIN_VALUE + 100);
+    registration.setName("icebergAuthenticationFilter");
+    return registration;
   }
 
   private static String headersToString(HttpServletRequest request) {
