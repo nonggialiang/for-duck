@@ -26,9 +26,14 @@ import jakarta.servlet.FilterChain;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.security.Principal;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.gravitino.UserPrincipal;
 import org.apache.gravitino.auth.AuthConstants;
+import org.apache.gravitino.iceberg.common.IcebergConfig;
+import org.apache.gravitino.iceberg.service.authentication.OAuth2TokenAuthenticator;
+import org.apache.gravitino.iceberg.service.authentication.OAuthConfig;
+import org.apache.gravitino.iceberg.service.authentication.OAuthTestKeys;
 import org.apache.gravitino.iceberg.service.authentication.SimpleAuthenticator;
 import org.apache.gravitino.utils.PrincipalUtils;
 import org.apache.iceberg.rest.responses.ErrorResponse;
@@ -162,5 +167,117 @@ class TestIcebergAuthenticationFilter {
   @SuppressWarnings("unused")
   private static void useUserPrincipal(UserPrincipal p) {
     // sanity that UserPrincipal is on the classpath for the test imports
+  }
+
+  // ---- OAuth (initialized authenticator) end-to-end ----
+
+  /** Builds an OAuth filter backed by a fully initialized OAuth2TokenAuthenticator. */
+  private IcebergAuthenticationFilter filterWithOauth(Map<String, String> overrides) {
+    OAuth2TokenAuthenticator authenticator = new OAuth2TokenAuthenticator();
+    authenticator.initialize(new IcebergConfig(OAuthTestKeys.configWith(overrides)));
+    return new IcebergAuthenticationFilter(java.util.List.of(authenticator));
+  }
+
+  private MockHttpServletRequest bearerRequest(String token) {
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setMethod("GET");
+    request.setRequestURI("/v1/config");
+    request.addHeader(
+        AuthConstants.HTTP_HEADER_AUTHORIZATION,
+        AuthConstants.AUTHORIZATION_BEARER_HEADER + token);
+    return request;
+  }
+
+  private static ErrorResponse readError(MockHttpServletResponse response) throws Exception {
+    assertTrue(
+        response.getContentType().contains("application/json"),
+        "expected JSON content type, got: " + response.getContentType());
+    return MAPPER.readValue(response.getContentAsByteArray(), ErrorResponse.class);
+  }
+
+  @Test
+  void oauthFilterAcceptsValidBearerToken() throws Exception {
+    IcebergAuthenticationFilter filter = filterWithOauth(java.util.Collections.emptyMap());
+    MockHttpServletRequest request = bearerRequest(OAuthTestKeys.jwt("alice", OAuthTestKeys.AUDIENCE));
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    AtomicReference<String> requester = new AtomicReference<>();
+    FilterChain chain = (req, res) -> requester.set(PrincipalUtils.getCurrentRequesterUserName());
+
+    filter.doFilter(request, response, chain);
+
+    assertEquals(200, response.getStatus());
+    assertEquals("alice", requester.get());
+    assertEquals(
+        "alice",
+        ((Principal) request.getAttribute(AuthConstants.AUTHENTICATED_PRINCIPAL_ATTRIBUTE_NAME))
+            .getName());
+  }
+
+  @Test
+  void oauthFilterRejectsMalformedBearer() throws Exception {
+    IcebergAuthenticationFilter filter = filterWithOauth(java.util.Collections.emptyMap());
+    MockHttpServletRequest request = bearerRequest("not.a.jwt");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    FilterChain chain = (req, res) -> {};
+
+    filter.doFilter(request, response, chain);
+
+    assertEquals(401, response.getStatus());
+    ErrorResponse error = readError(response);
+    assertEquals(401, error.code());
+  }
+
+  @Test
+  void oauthFilterRejectsWrongAudience() throws Exception {
+    IcebergAuthenticationFilter filter = filterWithOauth(java.util.Collections.emptyMap());
+    MockHttpServletRequest request = bearerRequest(OAuthTestKeys.jwt("alice", "wrong-audience"));
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    FilterChain chain = (req, res) -> {};
+
+    filter.doFilter(request, response, chain);
+
+    assertEquals(401, response.getStatus());
+    ErrorResponse error = readError(response);
+    assertEquals(401, error.code());
+  }
+
+  @Test
+  void oauthFilterDelegatorOverridesEffectiveUser() throws Exception {
+    IcebergAuthenticationFilter filter = filterWithOauth(java.util.Collections.emptyMap());
+    MockHttpServletRequest request = bearerRequest(OAuthTestKeys.jwt("alice", OAuthTestKeys.AUDIENCE));
+    request.addHeader(AuthConstants.ICEBERG_ACCESS_DELEGATOR_HEADER, "bob");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    AtomicReference<String> effective = new AtomicReference<>();
+    AtomicReference<String> requester = new AtomicReference<>();
+    FilterChain chain =
+        (req, res) -> {
+          effective.set(PrincipalUtils.getCurrentUserName());
+          requester.set(PrincipalUtils.getCurrentRequesterUserName());
+        };
+
+    filter.doFilter(request, response, chain);
+
+    assertEquals(200, response.getStatus());
+    assertEquals("alice", requester.get(), "requester must stay the JWT-authenticated user");
+    assertEquals("bob", effective.get(), "effective user must follow the delegator header");
+  }
+
+  @Test
+  void oauthFilterAppliesPrincipalMapper() throws Exception {
+    IcebergAuthenticationFilter filter =
+        filterWithOauth(
+            Map.of(
+                OAuthConfig.PRINCIPAL_MAPPER.getKey(), "regex",
+                OAuthConfig.PRINCIPAL_MAPPER_REGEX_PATTERN.getKey(), "^([^@]+)@.*$"));
+    MockHttpServletRequest request =
+        bearerRequest(OAuthTestKeys.jwt("alice@example.com", OAuthTestKeys.AUDIENCE));
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    AtomicReference<String> requester = new AtomicReference<>();
+    FilterChain chain = (req, res) -> requester.set(PrincipalUtils.getCurrentRequesterUserName());
+
+    filter.doFilter(request, response, chain);
+
+    assertEquals(200, response.getStatus());
+    assertEquals("alice", requester.get(), "regex principal mapper must extract the local-part");
   }
 }

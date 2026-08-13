@@ -18,7 +18,6 @@
  */
 package org.apache.gravitino.iceberg.service.authentication;
 
-import com.google.common.base.Preconditions;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwt;
@@ -55,12 +54,6 @@ public class StaticSignKeyValidator implements OAuthTokenValidator {
   public void initialize(Config config) {
     this.allowSkewSeconds = config.get(OAuthConfig.ALLOW_SKEW_SECONDS);
     String configuredSignKey = config.get(OAuthConfig.DEFAULT_SIGN_KEY);
-    Preconditions.checkArgument(
-        StringUtils.isNotBlank(config.get(OAuthConfig.DEFAULT_TOKEN_PATH)),
-        "The path for token of the default OAuth server can't be blank");
-    Preconditions.checkArgument(
-        StringUtils.isNotBlank(config.get(OAuthConfig.DEFAULT_SERVER_URI)),
-        "The uri of the default OAuth server can't be blank");
     String algType = config.get(OAuthConfig.SIGNATURE_ALGORITHM_TYPE);
     this.defaultSigningKey = decodeSignKey(Base64.getDecoder().decode(configuredSignKey), algType);
     this.principalFields = config.get(OAuthConfig.PRINCIPAL_FIELDS);

@@ -82,9 +82,9 @@ public class IcebergAuthenticationFilter extends OncePerRequestFilter {
           response.setHeader(AuthConstants.HTTP_CHALLENGE_HEADER, challenge);
         }
       }
-      sendAuthErrorResponse(response, ue);
+      sendErrorResponse(response, ue);
     } catch (Exception e) {
-      sendAuthErrorResponse(response, e);
+      sendErrorResponse(response, e);
     }
   }
 
@@ -118,7 +118,7 @@ public class IcebergAuthenticationFilter extends OncePerRequestFilter {
    * Renders an Iceberg {@link ErrorResponse} JSON body for an authentication failure. Reuses the
    * Iceberg exception mapping so clients receive spec-compliant error types and codes.
    */
-  protected void sendAuthErrorResponse(HttpServletResponse response, Exception exception)
+  protected void sendErrorResponse(HttpServletResponse response, Exception exception)
       throws IOException {
     Exception icebergException = IcebergExceptionMapper.convertToIcebergException(exception);
     int status = IcebergExceptionMapper.getErrorCode(icebergException);

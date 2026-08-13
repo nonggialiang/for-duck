@@ -64,23 +64,6 @@ public interface OAuthConfig {
           .stringConf()
           .createWithDefault(SignatureAlgorithm.RS256.name());
 
-  ConfigEntry<String> DEFAULT_SERVER_URI =
-      new ConfigBuilder(OAUTH_CONFIG_PREFIX + "serverUri")
-          .doc(
-              "The URI of the default OAuth server. Required when using StaticSignKeyValidator; not "
-                  + "required for JWKS-based validators")
-          .version(ConfigConstants.VERSION_1_2_0)
-          .stringConf()
-          .create();
-
-  ConfigEntry<String> DEFAULT_TOKEN_PATH =
-      new ConfigBuilder(OAUTH_CONFIG_PREFIX + "tokenPath")
-          .doc(
-              "The token path of the default OAuth server. Required when using StaticSignKeyValidator")
-          .version(ConfigConstants.VERSION_1_2_0)
-          .stringConf()
-          .create();
-
   ConfigEntry<String> AUTHORITY =
       new ConfigBuilder(OAUTH_CONFIG_PREFIX + "authority")
           .doc("OAuth authority / expected issuer URL used for JWT issuer validation")

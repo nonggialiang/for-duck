@@ -293,7 +293,7 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
    */
   public static final ConfigEntry<List<String>> AUTHENTICATORS =
       new ConfigBuilder("authenticators")
-          .doc("The authenticators the Iceberg REST server uses, separated by commas")
+          .doc("The authenticators the Iceberg REST server uses, separated by commas, valid values are simple/oauth")
           .version(ConfigConstants.VERSION_1_2_0)
           .stringConf()
           .toSequence()
