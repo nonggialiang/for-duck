@@ -19,20 +19,40 @@
 
 package org.apache.gravitino.iceberg.service.dispatcher;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.google.common.collect.ImmutableMap;
+import java.util.Arrays;
+import org.apache.gravitino.credential.CredentialPrivilege;
 import org.apache.gravitino.iceberg.service.CatalogWrapperForREST;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
+import org.apache.gravitino.iceberg.service.ServerContext;
+import org.apache.gravitino.iceberg.service.authorization.IcebergAuthorizer;
+import org.apache.gravitino.iceberg.service.authorization.IcebergOperation;
+import org.apache.gravitino.iceberg.service.authorization.IcebergResource;
+import org.apache.gravitino.iceberg.service.entitlement.EntitlementSupport;
 import org.apache.gravitino.listener.api.event.IcebergRequestContext;
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Schema;
+import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.exceptions.NoSuchViewException;
+import org.apache.iceberg.exceptions.ServiceFailureException;
 import org.apache.iceberg.rest.requests.CreateViewRequest;
 import org.apache.iceberg.rest.requests.RenameTableRequest;
 import org.apache.iceberg.rest.requests.UpdateTableRequest;
 import org.apache.iceberg.rest.responses.ListTablesResponse;
+import org.apache.iceberg.rest.responses.LoadTableResponse;
 import org.apache.iceberg.rest.responses.LoadViewResponse;
+import org.apache.iceberg.types.Types;
+import org.apache.iceberg.view.SQLViewRepresentation;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,6 +73,57 @@ public class TestIcebergViewOperationExecutor {
     mockContext = mock(IcebergRequestContext.class);
     when(mockContext.catalogName()).thenReturn("test_catalog");
     when(mockWrapperManager.getCatalogWrapper("test_catalog")).thenReturn(mockCatalogWrapper);
+  }
+
+  @AfterEach
+  public void tearDown() {
+    ServerContext.reset();
+  }
+
+  /** alice=row-filter only, bob=write only, dave=both, carol=neither. */
+  private static class StubAuthorizer implements IcebergAuthorizer {
+    @Override
+    public boolean checkOperation(
+        String userName, IcebergOperation op, IcebergResource resource) {
+      if (op == IcebergOperation.UPDATE_TABLE) {
+        return "bob".equals(userName) || "dave".equals(userName);
+      }
+      return true;
+    }
+
+    @Override
+    public String getRowFilter(String userName, IcebergResource resource) {
+      return ("alice".equals(userName) || "dave".equals(userName)) ? "region = 'US'" : null;
+    }
+
+    @Override
+    public CredentialPrivilege checkCredential(String userName, IcebergResource resource) {
+      return null;
+    }
+
+    @Override
+    public void registerOwner(String catalog, String namespace, String resource, String owner) {}
+
+    @Override
+    public void removeOwner(String catalog, String namespace, String resource) {}
+  }
+
+  private void initServerContext() {
+    ServerContext.reset();
+    ServerContext.initialize(new StubAuthorizer(), null, "test_catalog");
+  }
+
+  private LoadTableResponse newTableResponse() {
+    TableMetadata tableMetadata =
+        TableMetadata.newTableMetadata(
+            new Schema(
+                Arrays.asList(
+                    Types.NestedField.required(1, "id", Types.LongType.get()),
+                    Types.NestedField.optional(2, "region", Types.StringType.get()))),
+            PartitionSpec.unpartitioned(),
+            "s3://bucket/warehouse/ns/t1",
+            ImmutableMap.of());
+    return LoadTableResponse.builder().withTableMetadata(tableMetadata).build();
   }
 
   @Test
@@ -172,5 +243,78 @@ public class TestIcebergViewOperationExecutor {
     executor.renameView(mockContext, mockRequest);
 
     verify(mockCatalogWrapper).renameView(mockRequest);
+  }
+
+  @Test
+  public void testLoadViewSynthesizesEntitlementViewForEntitledUser() {
+    initServerContext();
+    when(mockContext.userName()).thenReturn("alice");
+    TableIdentifier viewId = TableIdentifier.of("test_ns", "t1");
+    when(mockCatalogWrapper.loadView(viewId))
+        .thenThrow(new NoSuchViewException("View does not exist"));
+    when(mockCatalogWrapper.loadTable(viewId)).thenReturn(newTableResponse());
+
+    LoadViewResponse response = executor.loadView(mockContext, viewId);
+
+    SQLViewRepresentation sql =
+        (SQLViewRepresentation) response.metadata().currentVersion().representations().get(0);
+    assertEquals("spark", sql.dialect());
+    assertEquals(
+        "SELECT * FROM `test_catalog`.`test_ns`.`t1@entitlement` WHERE region = 'US'", sql.sql());
+    assertEquals(
+        "true",
+        response.metadata().properties().get(EntitlementSupport.ENTITLEMENT_VIEW_PROPERTY));
+    verify(mockCatalogWrapper).loadTable(viewId);
+  }
+
+  @Test
+  public void testLoadViewSynthesizesWhenCatalogDoesNotSupportViews() {
+    initServerContext();
+    when(mockContext.userName()).thenReturn("alice");
+    TableIdentifier viewId = TableIdentifier.of("test_ns", "t1");
+    when(mockCatalogWrapper.loadView(viewId))
+        .thenThrow(new UnsupportedOperationException("catalog does not support view"));
+    when(mockCatalogWrapper.loadTable(viewId)).thenReturn(newTableResponse());
+
+    LoadViewResponse response = executor.loadView(mockContext, viewId);
+
+    SQLViewRepresentation sql =
+        (SQLViewRepresentation) response.metadata().currentVersion().representations().get(0);
+    assertTrue(sql.sql().contains("t1@entitlement"));
+  }
+
+  @Test
+  public void testLoadViewRethrowsWhenNoEntitlement() {
+    initServerContext();
+    when(mockContext.userName()).thenReturn("carol");
+    TableIdentifier viewId = TableIdentifier.of("test_ns", "missing_view");
+    NoSuchViewException original = new NoSuchViewException("View does not exist");
+    when(mockCatalogWrapper.loadView(viewId)).thenThrow(original);
+
+    assertThrows(NoSuchViewException.class, () -> executor.loadView(mockContext, viewId));
+  }
+
+  @Test
+  public void testLoadViewThrowsOnConflict() {
+    initServerContext();
+    when(mockContext.userName()).thenReturn("dave");
+    TableIdentifier viewId = TableIdentifier.of("test_ns", "t1");
+    when(mockCatalogWrapper.loadView(viewId))
+        .thenThrow(new NoSuchViewException("View does not exist"));
+
+    ServiceFailureException thrown =
+        assertThrows(ServiceFailureException.class, () -> executor.loadView(mockContext, viewId));
+    assertTrue(thrown.getMessage().contains("conflicts with the write privilege"));
+  }
+
+  @Test
+  public void testLoadViewRealViewWinsOverEntitlement() {
+    initServerContext();
+    when(mockContext.userName()).thenReturn("alice");
+    TableIdentifier viewId = TableIdentifier.of("test_ns", "real_view");
+    LoadViewResponse mockResponse = mock(LoadViewResponse.class);
+    when(mockCatalogWrapper.loadView(viewId)).thenReturn(mockResponse);
+
+    Assertions.assertEquals(mockResponse, executor.loadView(mockContext, viewId));
   }
 }

@@ -344,7 +344,10 @@ expireAfterWrite = 30s (可配置)
 maximumSize = 10,000
 ```
 
-OPA 请求格式：`POST {opaUrl}/v1/data/iceberg/rest`，body `{input: {user, action, resource}}`，期望 `{result: true/false}` 或 `{result: {credential_privilege: "write"|"read"}}`。
+OPA 请求格式（规则路径查询，而非包根查询——包根返回全部规则对象，无法按布尔解析）：
+
+- 操作鉴权：`POST {opaUrl}/v1/data/iceberg/rest/allow`，body `{input: {user, action, resource}}`，期望 `{result: true/false}`
+- 凭据鉴权：`POST {opaUrl}/v1/data/iceberg/rest/credential_privilege`，body `{input: {user, resource}}`，期望 `{result: "write"|"read"|null}`（`result` 缺失或为 null 视为无凭据权限）
 
 #### `ListResponseFilter`
 
@@ -631,6 +634,88 @@ volatile static ServerContext instance
 
 示例：`DummyCredentialProvider` 返回空凭据。
 
+### 5.14 动态视图（Entitlement Row Filter）
+
+元数据层的行级过滤：为配置了行过滤 SQL 的只读用户，把表"伪装"成视图——引擎按 Iceberg 的表→视图回退协议加载 `/views/{t}` 时，服务端合成一个引用 `t@entitlement` 后缀物理表、并带 `WHERE row_filter` 的视图。默认关闭（`authorization.entitlement.enabled=false`）。
+
+#### 端到端流程
+
+```
+alice(只读+filter region = 'US')   bob(写)      dave(写+filter)   carol(只读)
+GET /tables/t1 ──┐
+                 ├─ EntitlementFilter → resolveMode
+GET /tables/t1@entitlement ─┘        │
+                                     ├─ ENTITLED(alice)：/tables/t1 → 伪装404
+                                     │   /tables/t1@entitlement → 剥后缀→200真实表
+                                     │   /views/t1 → executor 合成视图：
+                                     │     SELECT * FROM `cat`.`db`.`t1@entitlement`
+                                     │     WHERE region = 'US'
+                                     ├─ NORMAL(bob/carol)：不干预，authz 决定
+                                     └─ CONFLICT(dave)：500 明确报错
+```
+
+#### resolveMode 三态语义（EntitlementSupport.resolveMode）
+
+| 写权限（UPDATE_TABLE 可通过） | 行过滤（getRowFilter 非空） | Mode | 行为 |
+|---|---|---|---|
+| F | F | NORMAL | 走普通 authz |
+| T | F | NORMAL | 全量访问，直接写原表 |
+| F | T | ENTITLED | 伪装 404 + 合成过滤视图 |
+| T | T | CONFLICT | 拒绝（500 `ServiceFailureException`），提示管理员移除其一 |
+
+写权限信号 = `checkOperation(user, UPDATE_TABLE, resource)`（owner / modify privilege 均视为写）。冲突在 load 阶段即暴露（引擎写前必先 load）。
+
+#### 请求侧唯一决策点：EntitlementFilter
+
+注册于认证 filter 之后（order = MIN_VALUE+110，`/v1/*`），按请求形态处理：
+
+| 请求形态 | 处理 |
+|---|---|
+| `/tables/{t}@entitlement`（`%40` 编码同样支持） | ENTITLED → `HttpServletRequestWrapper` 重写 URI/URL 剥后缀放行（下游正常 authz/凭证/缓存，返回真实表）；NORMAL → 不重写放行（下游自然 404，防绕过）；CONFLICT → 500 |
+| 无后缀的 GET/HEAD `/tables/{t}` | ENTITLED → 短路 404（`NoSuchTableException` JSON 形态，与 IcebergExceptionMapper 一致，防枚举）；CONFLICT → 500；NORMAL → 放行 |
+| 其他（`/views/`、POST、rename、list 等） | 放行（视图合成分流在 executor） |
+
+**死循环结构性消除**：伪装 404 只对"未带后缀的 GET/HEAD"生效，且发生在同一 filter 单次通过中；剥后缀后的请求恒为 200 真实表，引擎侧亦无循环。
+
+#### 视图合成：IcebergViewOperationExecutor.loadView
+
+`loadView` 抛 `NoSuchViewException | UnsupportedOperationException`（视图不存在或 catalog 不支持视图）时三态分流：ENTITLED → `wrapper.loadTable` 取 TableMetadata → `EntitlementSupport.buildLoadViewResponse`（SQL 由 dialect 生成；确定性 view-uuid = `nameUUIDFromBytes(user/catalog/schema/table)`；location = `表location + "-entitlement-view"`；schema 复用真实表；properties 标记 `gravitino.entitlement-view=true`；metadataLocation 为派生的虚拟路径）；CONFLICT → 抛 `ServiceFailureException`；NORMAL → 原样重抛。真实存在的视图优先于合成。
+
+#### OPA 契约（独立 rego 包）
+
+策略与数据均与鉴权包（`iceberg.rest`）分离：
+
+- 策略文件 `resources/opa/iceberg-entitlement-policy.rego`，`package iceberg.entitlement`，规则 `row_filter`
+- 查询端点 `POST /v1/data/iceberg/entitlement/row_filter`，body `{"input":{"user","resource":{...}}}`，响应 `{"result":"<行过滤SQL>"}`（缺失/null/非字符串 → null）
+- 数据文档（管理员经 OPA Data API 写入）：
+  ```
+  PUT /v1/data/iceberg/entitlement/filters/alice/cat/db/t1
+  body: "region = 'US'"     （JSON string）
+
+  DELETE /v1/data/iceberg/entitlement/filters/alice/cat/db/t1
+  ```
+- Java 侧独立缓存 `entitlementCache`（CacheKey("ent", user, null, resource)，同 TTL/容量）；`entitlementEnabled=false` 时不发任何请求
+
+#### Dialect 扩展点
+
+`EntitlementDialect` 接口（`name()` + `buildSelectSql(catalog, schema, suffixedTable, rowFilter)`），`EntitlementSupport.configureDialect` 启动时按 `authorization.entitlement.dialect` 选择（默认 `spark`，backtick 引用并转义内部反引号；未知名抛 IllegalArgumentException）。Iceberg ViewVersion 支持多 representation 共存，未来可一次下发多方言。
+
+#### 配置项
+
+| 配置 | 默认 | 说明 |
+|---|---|---|
+| `authorization.entitlement.enabled` | `false` | 是否启用 entitlement 行级过滤 |
+| `authorization.entitlement.dialect` | `spark` | 合成视图 SQL 方言 |
+
+#### 已知限制
+
+1. **文件级绕过**：行过滤是 SQL 层的；持有 S3 凭据者可直接读底层文件（元数据层过滤固有局限，需对象存储侧配合）
+2. `tableExists`/`SHOW TABLES` 对 entitled 用户仍报告表存在；listView 不列出合成视图（仅按名加载）
+3. dialect 默认 spark；其他引擎需实现 Dialect 且引擎支持 Iceberg view 规范 + 表→视图回退解析
+4. CONFLICT 用户在 load 阶段报 500
+5. 真实存在名为 `xxx@entitlement` 的表且用户对 `xxx` 有 entitlement 时，后缀语义优先（边缘冲突）
+6. OPA 行过滤查询失败时返回 null（按 NORMAL 处理），与 `checkCredential` 的容错一致
+
 ---
 
 ## 6. 关键实现细节
@@ -717,11 +802,10 @@ IcebergRestTestBase (@SpringBootTest + @AutoConfigureMockMvc)
 ├── TestSpringIcebergConfig (4 tests)
 ├── TestSpringIcebergNamespaceOperations (7 tests)
 ├── TestSpringIcebergTableOperations (5 tests)
-└── TestSpringIcebergViewOperations (4 tests)
+├── TestSpringIcebergViewOperations (4 tests)
+└── TestSpringIcebergEntitlementViews (5 tests，entitlement 动态视图端到端)
 ```
 
-测试用 `IcebergTestApp` 排除生产配置，提供 `@Primary` 测试 Bean（内存 Catalog、DummyCredentialProvider、AllowAllAuthorizer）。
+测试用 `IcebergTestApp` 排除生产配置，提供 `@Primary` 测试 Bean（内存 Catalog、DummyCredentialProvider），authorizer 为注入式 bean（默认 AllowAll，可用嵌套 `@TestConfiguration` 的 `@Primary` stub 覆盖；entitlement 测试以 `PrincipalUtils.doAs(new UserPrincipal(user), ...)` 包裹请求模拟不同用户）。
 
-非 MockMvc 测试：TestOPAIcebergAuthorizer（mock HTTP server）、TestIcebergMetadataAuthorizationMethodInterceptor、TestPrefixResolver、TestIcebergExceptionMapper 等。
-
-**总计 141 tests, 0 failures.**
+非 MockMvc 测试：TestOPAIcebergAuthorizer（mock HTTP server，含 row_filter 路径）、TestIcebergViewOperationExecutor（loadView 三态合成）、TestEntitlementSupport（resolveMode 四象限/后缀工具/视图合成）、TestEntitlementFilter（MockHttpServletRequest 直调 filter）、TestIcebergMetadataAuthorizationMethodInterceptor、TestPrefixResolver、TestIcebergExceptionMapper 等。

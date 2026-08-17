@@ -34,6 +34,7 @@ import org.apache.gravitino.iceberg.common.IcebergConfig;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
 import org.apache.gravitino.iceberg.service.IcebergObjectMapper;
 import org.apache.gravitino.iceberg.service.ServerContext;
+import org.apache.gravitino.iceberg.service.EntitlementFilter;
 import org.apache.gravitino.iceberg.service.authorization.IcebergAuthorizer;
 import org.apache.gravitino.iceberg.service.authorization.allowall.AllowAllAuthorizer;
 import org.apache.gravitino.iceberg.service.authorization.opa.OPAIcebergAuthorizer;
@@ -46,6 +47,7 @@ import org.apache.gravitino.iceberg.service.dispatcher.IcebergTableOperationExec
 import org.apache.gravitino.iceberg.service.dispatcher.IcebergViewEventDispatcher;
 import org.apache.gravitino.iceberg.service.dispatcher.IcebergViewOperationDispatcher;
 import org.apache.gravitino.iceberg.service.dispatcher.IcebergViewOperationExecutor;
+import org.apache.gravitino.iceberg.service.entitlement.EntitlementSupport;
 import org.apache.gravitino.iceberg.service.metrics.IcebergMetricsManager;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProvider;
 import org.apache.gravitino.iceberg.service.provider.StaticIcebergConfigProvider;
@@ -157,6 +159,23 @@ public class IcebergBeanConfig {
     return registration;
   }
 
+  /**
+   * Registers the {@link EntitlementFilter} right after the authentication filter so the current
+   * user is already available, and configures the entitlement view SQL dialect from {@link
+   * IcebergConfig#ENTITLEMENT_DIALECT}.
+   */
+  @Bean
+  public FilterRegistrationBean<EntitlementFilter> icebergEntitlementFilter(
+      IcebergConfig icebergConfig) {
+    EntitlementSupport.configureDialect(icebergConfig.get(IcebergConfig.ENTITLEMENT_DIALECT));
+    FilterRegistrationBean<EntitlementFilter> registration =
+        new FilterRegistrationBean<>(new EntitlementFilter());
+    registration.addUrlPatterns("/v1/*");
+    registration.setOrder(Integer.MIN_VALUE + 110);
+    registration.setName("icebergEntitlementFilter");
+    return registration;
+  }
+
   private static String headersToString(HttpServletRequest request) {
     Enumeration<String> headerNames = request.getHeaderNames();
     if (headerNames == null) {
@@ -258,12 +277,15 @@ public class IcebergBeanConfig {
       String opaUrl = icebergConfig.get(IcebergConfig.OPA_URL);
       long cacheTtl = icebergConfig.get(IcebergConfig.OPA_CACHE_TTL_SECONDS);
       long timeout = icebergConfig.get(IcebergConfig.OPA_TIMEOUT_MS);
+      boolean entitlementEnabled = icebergConfig.get(IcebergConfig.ENTITLEMENT_ENABLED);
       LOG.info(
-          "Using OPAIcebergAuthorizer with URL: {}, cacheTtl: {}s, timeout: {}ms",
+          "Using OPAIcebergAuthorizer with URL: {}, cacheTtl: {}s, timeout: {}ms, "
+              + "entitlementEnabled: {}",
           opaUrl,
           cacheTtl,
-          timeout);
-      return new OPAIcebergAuthorizer(opaUrl, cacheTtl, timeout);
+          timeout,
+          entitlementEnabled);
+      return new OPAIcebergAuthorizer(opaUrl, cacheTtl, timeout, entitlementEnabled);
     } else {
       LOG.warn(
           "Unknown authorizer type '{}', falling back to AllowAllAuthorizer", authorizerType);

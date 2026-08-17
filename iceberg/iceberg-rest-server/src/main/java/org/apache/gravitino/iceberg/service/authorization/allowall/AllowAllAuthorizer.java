@@ -34,6 +34,11 @@ public class AllowAllAuthorizer implements IcebergAuthorizer {
   }
 
   @Override
+  public String getRowFilter(String userName, IcebergResource resource) {
+    return null;
+  }
+
+  @Override
   public CredentialPrivilege checkCredential(String userName, IcebergResource resource) {
     return CredentialPrivilege.WRITE;
   }

@@ -23,13 +23,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.apache.gravitino.credential.CredentialPrivilege;
 import org.apache.gravitino.iceberg.service.authorization.IcebergOperation;
 import org.apache.gravitino.iceberg.service.authorization.IcebergResource;
@@ -39,10 +43,19 @@ import org.junit.jupiter.api.Test;
 
 class TestOPAIcebergAuthorizer {
 
+  private static final String ALLOW_RULE_PATH = "/v1/data/iceberg/rest/allow";
+  private static final String CREDENTIAL_RULE_PATH = "/v1/data/iceberg/rest/credential_privilege";
+  private static final String ENTITLEMENT_RULE_PATH =
+      "/v1/data/iceberg/entitlement/row_filter";
+
   private static HttpServer mockOpaServer;
   private static String mockOpaUrl;
   private static final AtomicInteger queryCount = new AtomicInteger(0);
-  private static volatile String nextResponse = "{\"result\":true}";
+  private static final AtomicReference<String> lastQueriedPath = new AtomicReference<>();
+  private static final AtomicReference<String> lastRequestBody = new AtomicReference<>();
+  private static volatile String nextOperationResponse = "{\"result\":true}";
+  private static volatile String nextCredentialResponse = "{\"result\":null}";
+  private static volatile String nextEntitlementResponse = "{\"result\":null}";
 
   @BeforeAll
   static void startMockServer() throws IOException {
@@ -54,11 +67,30 @@ class TestOPAIcebergAuthorizer {
         new HttpHandler() {
           @Override
           public void handle(HttpExchange exchange) throws IOException {
+            String path = exchange.getRequestURI().getPath();
+            lastQueriedPath.set(path);
             queryCount.incrementAndGet();
-            byte[] resp = nextResponse.getBytes();
-            exchange.sendResponseHeaders(200, resp.length);
+            lastRequestBody.set(
+                new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            String resp;
+            if (ALLOW_RULE_PATH.equals(path)) {
+              resp = nextOperationResponse;
+            } else if (CREDENTIAL_RULE_PATH.equals(path)) {
+              resp = nextCredentialResponse;
+            } else if (ENTITLEMENT_RULE_PATH.equals(path)) {
+              resp = nextEntitlementResponse;
+            } else {
+              byte[] notFound = "{}".getBytes(StandardCharsets.UTF_8);
+              exchange.sendResponseHeaders(404, notFound.length);
+              try (OutputStream os = exchange.getResponseBody()) {
+                os.write(notFound);
+              }
+              return;
+            }
+            byte[] respBytes = resp.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, respBytes.length);
             try (OutputStream os = exchange.getResponseBody()) {
-              os.write(resp);
+              os.write(respBytes);
             }
           }
         });
@@ -73,25 +105,27 @@ class TestOPAIcebergAuthorizer {
   @Test
   void testCheckOperationAllow() {
     queryCount.set(0);
-    nextResponse = "{\"result\":true}";
+    nextOperationResponse = "{\"result\":true}";
     OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000);
     IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
     assertTrue(authorizer.checkOperation("alice", IcebergOperation.LOAD_TABLE, resource));
+    assertEquals(ALLOW_RULE_PATH, lastQueriedPath.get());
   }
 
   @Test
   void testCheckOperationDeny() {
     queryCount.set(0);
-    nextResponse = "{\"result\":false}";
+    nextOperationResponse = "{\"result\":false}";
     OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000);
     IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
     assertFalse(authorizer.checkOperation("bob", IcebergOperation.LOAD_TABLE, resource));
+    assertEquals(ALLOW_RULE_PATH, lastQueriedPath.get());
   }
 
   @Test
   void testCheckOperationDeniesOnInvalidResponse() {
     queryCount.set(0);
-    nextResponse = "{}";
+    nextOperationResponse = "{}";
     OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000);
     IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
     assertFalse(authorizer.checkOperation("charlie", IcebergOperation.CREATE_TABLE, resource));
@@ -100,7 +134,7 @@ class TestOPAIcebergAuthorizer {
   @Test
   void testCheckOperationCachesResults() {
     queryCount.set(0);
-    nextResponse = "{\"result\":true}";
+    nextOperationResponse = "{\"result\":true}";
     OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 3600, 5000);
     IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
 
@@ -115,30 +149,41 @@ class TestOPAIcebergAuthorizer {
   @Test
   void testCheckCredentialWrite() {
     queryCount.set(0);
-    nextResponse = "{\"result\":{\"credential_privilege\":\"write\"}}";
+    nextCredentialResponse = "{\"result\":\"write\"}";
     OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000);
     IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
     assertEquals(
         CredentialPrivilege.WRITE, authorizer.checkCredential("alice", resource));
+    assertEquals(CREDENTIAL_RULE_PATH, lastQueriedPath.get());
   }
 
   @Test
   void testCheckCredentialRead() {
     queryCount.set(0);
-    nextResponse = "{\"result\":{\"credential_privilege\":\"read\"}}";
+    nextCredentialResponse = "{\"result\":\"read\"}";
     OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000);
     IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
     assertEquals(
         CredentialPrivilege.READ, authorizer.checkCredential("bob", resource));
+    assertEquals(CREDENTIAL_RULE_PATH, lastQueriedPath.get());
   }
 
   @Test
   void testCheckCredentialNullOnNoResult() {
     queryCount.set(0);
-    nextResponse = "{\"result\":null}";
+    nextCredentialResponse = "{\"result\":null}";
     OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000);
     IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
     assertNull(authorizer.checkCredential("charlie", resource));
+  }
+
+  @Test
+  void testCheckCredentialNullOnMissingResult() {
+    queryCount.set(0);
+    nextCredentialResponse = "{}";
+    OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000);
+    IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
+    assertNull(authorizer.checkCredential("dave", resource));
   }
 
   @Test
@@ -148,5 +193,62 @@ class TestOPAIcebergAuthorizer {
         new OPAIcebergAuthorizer("http://localhost:1", 0, 100);
     IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
     assertFalse(authorizer.checkOperation("alice", IcebergOperation.LOAD_TABLE, resource));
+  }
+
+  @Test
+  void testGetRowFilterReturnsFilter() {
+    queryCount.set(0);
+    nextEntitlementResponse = "{\"result\":\"region = 'US'\"}";
+    OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000, true);
+    IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
+    assertEquals("region = 'US'", authorizer.getRowFilter("alice", resource));
+    assertEquals(ENTITLEMENT_RULE_PATH, lastQueriedPath.get());
+
+    // request body carries user and resource coordinates
+    JsonNode body;
+    try {
+      body = new ObjectMapper().readTree(lastRequestBody.get());
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+    assertEquals("alice", body.get("input").get("user").asText());
+    assertEquals("table", body.get("input").get("resource").get("type").asText());
+    assertEquals("cat", body.get("input").get("resource").get("catalog").asText());
+    assertEquals("db", body.get("input").get("resource").get("schema").asText());
+    assertEquals("t1", body.get("input").get("resource").get("name").asText());
+  }
+
+  @Test
+  void testGetRowFilterNullWhenNoResult() {
+    nextEntitlementResponse = "{\"result\":null}";
+    OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000, true);
+    IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
+    assertNull(authorizer.getRowFilter("bob", resource));
+  }
+
+  @Test
+  void testGetRowFilterNullOnMissingResult() {
+    nextEntitlementResponse = "{}";
+    OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000, true);
+    IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
+    assertNull(authorizer.getRowFilter("carol", resource));
+  }
+
+  @Test
+  void testGetRowFilterNullOnNonStringResult() {
+    nextEntitlementResponse = "{\"result\":42}";
+    OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000, true);
+    IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
+    assertNull(authorizer.getRowFilter("carol", resource));
+  }
+
+  @Test
+  void testGetRowFilterDisabledSendsNoRequest() {
+    queryCount.set(0);
+    nextEntitlementResponse = "{\"result\":\"region = 'US'\"}";
+    OPAIcebergAuthorizer authorizer = new OPAIcebergAuthorizer(mockOpaUrl, 0, 5000, false);
+    IcebergResource resource = IcebergResource.ofTable("cat", "db", "t1");
+    assertNull(authorizer.getRowFilter("alice", resource));
+    assertEquals(0, queryCount.get(), "entitlement-disabled authorizer must not query OPA");
   }
 }

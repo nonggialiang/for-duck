@@ -33,7 +33,7 @@ class TestIcebergPropertiesUtils {
     Map<String, String> gravitinoProps = new HashMap<>();
     gravitinoProps.put(IcebergConstants.CATALOG_BACKEND, "jdbc");
     gravitinoProps.put(IcebergConstants.GRAVITINO_JDBC_USER, "admin");
-    gravitinoProps.put(IcebergConstants.GRAVITINO_JDBC_PASSWORD, "secret");
+    gravitinoProps.put(IcebergConstants.GRAVITINO_JDBC_PSWD, "secret");
     gravitinoProps.put(IcebergConstants.URI, "jdbc:sqlite::memory:");
     gravitinoProps.put(IcebergConstants.WAREHOUSE, "/tmp/warehouse");
 
@@ -42,7 +42,7 @@ class TestIcebergPropertiesUtils {
 
     assertEquals("jdbc", icebergProps.get(IcebergConstants.CATALOG_BACKEND));
     assertEquals("admin", icebergProps.get(IcebergConstants.ICEBERG_JDBC_USER));
-    assertEquals("secret", icebergProps.get(IcebergConstants.ICEBERG_JDBC_PASSWORD));
+    assertEquals("secret", icebergProps.get(IcebergConstants.ICEBERG_JDBC_PSWD));
     assertEquals("jdbc:sqlite::memory:", icebergProps.get(IcebergConstants.URI));
     assertEquals("/tmp/warehouse", icebergProps.get(IcebergConstants.WAREHOUSE));
   }

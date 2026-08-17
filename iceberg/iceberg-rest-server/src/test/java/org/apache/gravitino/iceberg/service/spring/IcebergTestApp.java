@@ -24,8 +24,10 @@ import java.util.Map;
 import org.apache.gravitino.catalog.lakehouse.iceberg.IcebergConstants;
 import org.apache.gravitino.credential.CredentialConstants;
 import org.apache.gravitino.iceberg.common.IcebergConfig;
+import org.apache.gravitino.iceberg.service.EntitlementFilter;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
 import org.apache.gravitino.iceberg.service.ServerContext;
+import org.apache.gravitino.iceberg.service.authorization.IcebergAuthorizer;
 import org.apache.gravitino.iceberg.service.authorization.allowall.AllowAllAuthorizer;
 import org.apache.gravitino.iceberg.service.dispatcher.IcebergNamespaceEventDispatcher;
 import org.apache.gravitino.iceberg.service.dispatcher.IcebergNamespaceOperationDispatcher;
@@ -36,6 +38,7 @@ import org.apache.gravitino.iceberg.service.dispatcher.IcebergTableOperationExec
 import org.apache.gravitino.iceberg.service.dispatcher.IcebergViewEventDispatcher;
 import org.apache.gravitino.iceberg.service.dispatcher.IcebergViewOperationDispatcher;
 import org.apache.gravitino.iceberg.service.dispatcher.IcebergViewOperationExecutor;
+import org.apache.gravitino.iceberg.service.entitlement.EntitlementSupport;
 import org.apache.gravitino.iceberg.service.extension.DummyCredentialProvider;
 import org.apache.gravitino.iceberg.service.metrics.IcebergMetricsManager;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProvider;
@@ -47,6 +50,7 @@ import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.rest.RESTUtil;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
@@ -87,6 +91,31 @@ public class IcebergTestApp {
   @Bean
   public IcebergConfig icebergTestConfig() {
     return new IcebergConfig();
+  }
+
+  /**
+   * Default test authorizer; deliberately not {@code @Primary} so entitlement tests can override it
+   * with a stub authorizer via a nested {@code @TestConfiguration} carrying {@code @Primary}.
+   */
+  @Bean
+  public IcebergAuthorizer icebergTestAuthorizer() {
+    return new AllowAllAuthorizer();
+  }
+
+  /**
+   * Registers the entitlement filter (as the production {@code IcebergBeanConfig} is excluded here)
+   * so MockMvc-based tests exercise the same request-flow decisions as the real server.
+   */
+  @Bean
+  public FilterRegistrationBean<EntitlementFilter> icebergTestEntitlementFilter(
+      IcebergConfig icebergTestConfig) {
+    EntitlementSupport.configureDialect(icebergTestConfig.get(IcebergConfig.ENTITLEMENT_DIALECT));
+    FilterRegistrationBean<EntitlementFilter> registration =
+        new FilterRegistrationBean<>(new EntitlementFilter());
+    registration.addUrlPatterns("/v1/*");
+    registration.setOrder(Integer.MIN_VALUE + 110);
+    registration.setName("icebergEntitlementFilter");
+    return registration;
   }
 
   @Bean
@@ -196,12 +225,15 @@ public class IcebergTestApp {
   @org.springframework.stereotype.Component
   static class TestServerContextInitializer {
 
+    private final IcebergAuthorizer authorizer;
     private final IcebergConfigProvider configProvider;
     private final IcebergCatalogWrapperManager catalogWrapperManager;
 
     TestServerContextInitializer(
+        IcebergAuthorizer authorizer,
         IcebergConfigProvider configProvider,
         IcebergCatalogWrapperManager catalogWrapperManager) {
+      this.authorizer = authorizer;
       this.configProvider = configProvider;
       this.catalogWrapperManager = catalogWrapperManager;
     }
@@ -210,9 +242,7 @@ public class IcebergTestApp {
     public void init() {
       ServerContext.reset();
       ServerContext.initialize(
-          new AllowAllAuthorizer(),
-          catalogWrapperManager,
-          configProvider.getDefaultCatalogName());
+          authorizer, catalogWrapperManager, configProvider.getDefaultCatalogName());
     }
   }
 }

@@ -26,8 +26,8 @@ public class IcebergConstants {
   public static final String GRAVITINO_JDBC_USER = "jdbc-user";
   public static final String ICEBERG_JDBC_USER = "jdbc.user";
 
-  public static final String GRAVITINO_JDBC_PASSWORD = "jdbc-password";
-  public static final String ICEBERG_JDBC_PASSWORD = "jdbc.password";
+  public static final String GRAVITINO_JDBC_PSWD = "jdbc-password";
+  public static final String ICEBERG_JDBC_PSWD = "jdbc.password";
   public static final String ICEBERG_JDBC_INITIALIZE = "jdbc-initialize";
 
   public static final String GRAVITINO_JDBC_SCHEMA_VERSION = "jdbc-schema-version";

@@ -44,6 +44,13 @@ public class OPAIcebergAuthorizer implements IcebergAuthorizer {
   public static final String NAME = "opa";
   public static final String OPA_PACKAGE = "iceberg.rest";
   public static final String OPA_DATA_OWNERS_PATH = "/v1/data/iceberg/rest/owners";
+  public static final String OPA_OPERATION_RULE_PATH =
+      "/v1/data/" + OPA_PACKAGE.replace('.', '/') + "/allow";
+  public static final String OPA_CREDENTIAL_RULE_PATH =
+      "/v1/data/" + OPA_PACKAGE.replace('.', '/') + "/credential_privilege";
+  public static final String OPA_ENTITLEMENT_PACKAGE = "iceberg.entitlement";
+  public static final String OPA_ENTITLEMENT_RULE_PATH =
+      "/v1/data/" + OPA_ENTITLEMENT_PACKAGE.replace('.', '/') + "/row_filter";
 
   private static final long DEFAULT_CACHE_TTL_SECONDS = 30;
   private static final long DEFAULT_TIMEOUT_MS = 2000;
@@ -53,11 +60,15 @@ public class OPAIcebergAuthorizer implements IcebergAuthorizer {
   private final ObjectMapper objectMapper;
   private final Cache<CacheKey, Boolean> decisionCache;
   private final Cache<CacheKey, CredentialPrivilege> credentialCache;
+  private final Cache<CacheKey, String> entitlementCache;
   private final long timeoutMs;
+  private final boolean entitlementEnabled;
 
-  public OPAIcebergAuthorizer(String opaUrl, long cacheTtlSeconds, long timeoutMs) {
+  public OPAIcebergAuthorizer(
+      String opaUrl, long cacheTtlSeconds, long timeoutMs, boolean entitlementEnabled) {
     this.opaUrl = opaUrl.endsWith("/") ? opaUrl.substring(0, opaUrl.length() - 1) : opaUrl;
     this.timeoutMs = timeoutMs;
+    this.entitlementEnabled = entitlementEnabled;
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofMillis(timeoutMs))
         .build();
@@ -70,6 +81,14 @@ public class OPAIcebergAuthorizer implements IcebergAuthorizer {
         .expireAfterWrite(cacheTtlSeconds, TimeUnit.SECONDS)
         .maximumSize(10_000)
         .build();
+    this.entitlementCache = Caffeine.newBuilder()
+        .expireAfterWrite(cacheTtlSeconds, TimeUnit.SECONDS)
+        .maximumSize(10_000)
+        .build();
+  }
+
+  public OPAIcebergAuthorizer(String opaUrl, long cacheTtlSeconds, long timeoutMs) {
+    this(opaUrl, cacheTtlSeconds, timeoutMs, false);
   }
 
   public OPAIcebergAuthorizer(String opaUrl) {
@@ -81,6 +100,15 @@ public class OPAIcebergAuthorizer implements IcebergAuthorizer {
       String userName, IcebergOperation op, IcebergResource resource) {
     CacheKey key = new CacheKey("op", userName, op.name(), resource);
     return decisionCache.get(key, k -> doCheckOperation(userName, op, resource));
+  }
+
+  @Override
+  public String getRowFilter(String userName, IcebergResource resource) {
+    if (!entitlementEnabled) {
+      return null;
+    }
+    CacheKey key = new CacheKey("ent", userName, null, resource);
+    return entitlementCache.get(key, k -> doGetRowFilter(userName, resource));
   }
 
   @Override
@@ -109,14 +137,15 @@ public class OPAIcebergAuthorizer implements IcebergAuthorizer {
       ObjectNode request = objectMapper.createObjectNode();
       request.set("input", input);
 
-      HttpResponse<String> response = sendOpaQuery(request);
+      HttpResponse<String> response = sendOpaQuery(OPA_OPERATION_RULE_PATH, request);
       if (response.statusCode() == 200) {
         JsonNode result = objectMapper.readTree(response.body());
         if (result.has("result") && result.get("result").isBoolean()) {
           return result.get("result").asBoolean();
         }
       }
-      LOG.warn("OPA returned unexpected response for operation check: status={}", response.statusCode());
+      LOG.warn(
+          "OPA returned unexpected response for operation check: status={}", response.statusCode());
       return false;
     } catch (Exception e) {
       LOG.error("OPA operation check failed, denying access", e);
@@ -130,12 +159,12 @@ public class OPAIcebergAuthorizer implements IcebergAuthorizer {
       ObjectNode request = objectMapper.createObjectNode();
       request.set("input", input);
 
-      HttpResponse<String> response = sendOpaQuery(request);
+      HttpResponse<String> response = sendOpaQuery(OPA_CREDENTIAL_RULE_PATH, request);
       if (response.statusCode() == 200) {
         JsonNode result = objectMapper.readTree(response.body());
         JsonNode credResult = result.get("result");
-        if (credResult != null) {
-          String privilege = credResult.get("credential_privilege").asText();
+        if (credResult != null && credResult.isTextual()) {
+          String privilege = credResult.asText();
           if ("write".equalsIgnoreCase(privilege)) {
             return CredentialPrivilege.WRITE;
           } else if ("read".equalsIgnoreCase(privilege)) {
@@ -146,6 +175,27 @@ public class OPAIcebergAuthorizer implements IcebergAuthorizer {
       return null;
     } catch (Exception e) {
       LOG.error("OPA credential check failed", e);
+      return null;
+    }
+  }
+
+  private String doGetRowFilter(String userName, IcebergResource resource) {
+    try {
+      ObjectNode input = buildInput(userName, null, resource);
+      ObjectNode request = objectMapper.createObjectNode();
+      request.set("input", input);
+
+      HttpResponse<String> response = sendOpaQuery(OPA_ENTITLEMENT_RULE_PATH, request);
+      if (response.statusCode() == 200) {
+        JsonNode result = objectMapper.readTree(response.body());
+        JsonNode filterResult = result.get("result");
+        if (filterResult != null && filterResult.isTextual()) {
+          return filterResult.asText();
+        }
+      }
+      return null;
+    } catch (Exception e) {
+      LOG.error("OPA entitlement row filter query failed", e);
       return null;
     }
   }
@@ -170,8 +220,8 @@ public class OPAIcebergAuthorizer implements IcebergAuthorizer {
     return input;
   }
 
-  private HttpResponse<String> sendOpaQuery(ObjectNode body) throws Exception {
-    String url = opaUrl + "/v1/data/" + OPA_PACKAGE;
+  private HttpResponse<String> sendOpaQuery(String path, ObjectNode body) throws Exception {
+    String url = opaUrl + path;
     HttpRequest request = HttpRequest.newBuilder()
         .uri(URI.create(url))
         .header("Content-Type", "application/json")

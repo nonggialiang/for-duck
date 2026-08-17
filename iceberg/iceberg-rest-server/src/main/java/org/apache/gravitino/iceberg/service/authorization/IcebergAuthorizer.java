@@ -18,6 +18,7 @@
  */
 package org.apache.gravitino.iceberg.service.authorization;
 
+import javax.annotation.Nullable;
 import org.apache.gravitino.credential.CredentialPrivilege;
 
 public interface IcebergAuthorizer {
@@ -31,6 +32,17 @@ public interface IcebergAuthorizer {
    * @return true if authorized, false otherwise
    */
   boolean checkOperation(String userName, IcebergOperation op, IcebergResource resource);
+
+  /**
+   * Returns the entitlement row-filter SQL for the user on the given table resource, or null when
+   * the user has no row filter configured (or entitlement is not enabled).
+   *
+   * @param userName the authenticated user name
+   * @param resource the target table resource
+   * @return the row-filter SQL expression, or null if no entitlement applies
+   */
+  @Nullable
+  String getRowFilter(String userName, IcebergResource resource);
 
   /**
    * Determines the credential privilege level for a user on a resource.

@@ -59,7 +59,7 @@ public class TestIcebergCatalogUtil {
     properties.put(CatalogProperties.WAREHOUSE_LOCATION, "test");
     properties.put(IcebergConstants.GRAVITINO_JDBC_DRIVER, "org.sqlite.JDBC");
     properties.put(IcebergConstants.ICEBERG_JDBC_USER, "test");
-    properties.put(IcebergConstants.ICEBERG_JDBC_PASSWORD, "test");
+    properties.put(IcebergConstants.ICEBERG_JDBC_PSWD, "test");
     properties.put(IcebergConstants.ICEBERG_JDBC_INITIALIZE, "true");
     catalog =
         IcebergCatalogUtil.loadCatalogBackend(
@@ -80,7 +80,7 @@ public class TestIcebergCatalogUtil {
     properties.put(CatalogProperties.WAREHOUSE_LOCATION, "test");
     properties.put(IcebergConstants.GRAVITINO_JDBC_DRIVER, "org.sqlite.JDBC");
     properties.put(IcebergConstants.ICEBERG_JDBC_USER, "test");
-    properties.put(IcebergConstants.ICEBERG_JDBC_PASSWORD, "test");
+    properties.put(IcebergConstants.ICEBERG_JDBC_PSWD, "test");
     // jdbc.schema-version is intentionally not set; default should be V1
     Catalog catalog =
         IcebergCatalogUtil.loadCatalogBackend(
@@ -98,7 +98,7 @@ public class TestIcebergCatalogUtil {
     properties.put(CatalogProperties.WAREHOUSE_LOCATION, "test");
     properties.put(IcebergConstants.GRAVITINO_JDBC_DRIVER, "org.sqlite.JDBC");
     properties.put(IcebergConstants.ICEBERG_JDBC_USER, "test");
-    properties.put(IcebergConstants.ICEBERG_JDBC_PASSWORD, "test");
+    properties.put(IcebergConstants.ICEBERG_JDBC_PSWD, "test");
     // Explicitly set V0; loadJdbcCatalog must not override it with V1
     properties.put(IcebergConstants.ICEBERG_JDBC_SCHEMA_VERSION, "V0");
     Catalog catalog =

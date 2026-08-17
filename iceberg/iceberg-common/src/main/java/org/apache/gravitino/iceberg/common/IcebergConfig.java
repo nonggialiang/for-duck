@@ -74,7 +74,7 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .create();
 
   public static final ConfigEntry<String> JDBC_PASSWORD =
-      new ConfigBuilder(IcebergConstants.GRAVITINO_JDBC_PASSWORD)
+      new ConfigBuilder(IcebergConstants.GRAVITINO_JDBC_PSWD)
           .doc("The password of the Jdbc connection")
           .version(ConfigConstants.VERSION_0_2_0)
           .stringConf()
@@ -285,6 +285,25 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .version(ConfigConstants.VERSION_1_2_0)
           .longConf()
           .createWithDefault(2000L);
+
+  public static final ConfigEntry<Boolean> ENTITLEMENT_ENABLED =
+      new ConfigBuilder("authorization.entitlement.enabled")
+          .doc(
+              "Whether to enable entitlement row-level filtering. When enabled, users with an "
+                  + "entitlement row filter configured in the authorizer are redirected to a "
+                  + "synthesized filtered view instead of seeing the raw table")
+          .version(ConfigConstants.VERSION_1_2_0)
+          .booleanConf()
+          .createWithDefault(false);
+
+  public static final ConfigEntry<String> ENTITLEMENT_DIALECT =
+      new ConfigBuilder("authorization.entitlement.dialect")
+          .doc(
+              "The SQL dialect used to generate the SQL of synthesized entitlement views, "
+                  + "for example 'spark'")
+          .version(ConfigConstants.VERSION_1_2_0)
+          .stringConf()
+          .createWithDefault("spark");
 
   /**
    * The authenticators the Iceberg REST server uses, in priority order. Built-in aliases are

@@ -19,14 +19,20 @@
 
 package org.apache.gravitino.iceberg.service.dispatcher;
 
+import org.apache.gravitino.iceberg.service.CatalogWrapperForREST;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
+import org.apache.gravitino.iceberg.service.authorization.IcebergResource;
+import org.apache.gravitino.iceberg.service.entitlement.EntitlementSupport;
 import org.apache.gravitino.listener.api.event.IcebergRequestContext;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.exceptions.NoSuchViewException;
+import org.apache.iceberg.exceptions.ServiceFailureException;
 import org.apache.iceberg.rest.requests.CreateViewRequest;
 import org.apache.iceberg.rest.requests.RenameTableRequest;
 import org.apache.iceberg.rest.requests.UpdateTableRequest;
 import org.apache.iceberg.rest.responses.ListTablesResponse;
+import org.apache.iceberg.rest.responses.LoadTableResponse;
 import org.apache.iceberg.rest.responses.LoadViewResponse;
 
 public class IcebergViewOperationExecutor implements IcebergViewOperationDispatcher {
@@ -62,9 +68,47 @@ public class IcebergViewOperationExecutor implements IcebergViewOperationDispatc
 
   @Override
   public LoadViewResponse loadView(IcebergRequestContext context, TableIdentifier viewIdentifier) {
-    return icebergCatalogWrapperManager
-        .getCatalogWrapper(context.catalogName())
-        .loadView(viewIdentifier);
+    CatalogWrapperForREST catalogWrapper =
+        icebergCatalogWrapperManager.getCatalogWrapper(context.catalogName());
+    try {
+      return catalogWrapper.loadView(viewIdentifier);
+    } catch (NoSuchViewException | UnsupportedOperationException e) {
+      return loadEntitlementViewIfPresent(context, viewIdentifier, catalogWrapper, e);
+    }
+  }
+
+  /**
+   * Fallback when the view does not exist (or the catalog supports no views at all): entitled
+   * users get a synthesized view over the suffixed physical table; conflicting users get an
+   * explicit error; everyone else sees the original exception.
+   */
+  private LoadViewResponse loadEntitlementViewIfPresent(
+      IcebergRequestContext context,
+      TableIdentifier viewIdentifier,
+      CatalogWrapperForREST catalogWrapper,
+      RuntimeException original) {
+    String user = context.userName();
+    IcebergResource resource =
+        IcebergResource.ofTable(
+            context.catalogName(),
+            viewIdentifier.namespace().level(viewIdentifier.namespace().levels().length - 1),
+            viewIdentifier.name());
+    switch (EntitlementSupport.resolveMode(user, resource)) {
+      case ENTITLED:
+        String rowFilter = EntitlementSupport.getRowFilter(user, resource);
+        LoadTableResponse tableResponse = catalogWrapper.loadTable(viewIdentifier);
+        return EntitlementSupport.buildLoadViewResponse(
+            context.catalogName(),
+            resource.getSchemaName(),
+            viewIdentifier.name(),
+            tableResponse.tableMetadata(),
+            rowFilter,
+            user);
+      case CONFLICT:
+        throw new ServiceFailureException(EntitlementSupport.conflictMessage(user, resource));
+      default:
+        throw original;
+    }
   }
 
   @Override

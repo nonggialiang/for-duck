@@ -339,6 +339,13 @@
                 <scope>provided</scope>
             </dependency>
 
+            <!-- ==================== Driver ==================== -->
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>${postgresql.version}</version>
+            </dependency>
+
             <!-- ==================== Test ==================== -->
             <dependency>
                 <groupId>org.junit.jupiter</groupId>
@@ -380,12 +387,6 @@
                 <groupId>mysql</groupId>
                 <artifactId>mysql-connector-java</artifactId>
                 <version>${mysql.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.postgresql</groupId>
-                <artifactId>postgresql</artifactId>
-                <version>${postgresql.version}</version>
                 <scope>test</scope>
             </dependency>
             <dependency>
