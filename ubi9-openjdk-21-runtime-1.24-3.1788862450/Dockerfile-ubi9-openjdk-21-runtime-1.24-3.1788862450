@@ -1,0 +1,202 @@
+
+# This is a Dockerfile for the ubi9/openjdk-21-runtime:1.24 image.
+
+
+## START target image ubi9/openjdk-21-runtime:1.24
+## \
+    FROM registry.access.redhat.com/ubi9/ubi-minimal
+
+
+    USER root
+
+###### START module 'jboss.container.util.pkg-update:1.0'
+###### \
+        # Copy 'jboss.container.util.pkg-update' module content
+        COPY modules/jboss.container.util.pkg-update /tmp/scripts/jboss.container.util.pkg-update
+        # Custom scripts from 'jboss.container.util.pkg-update' module
+        USER root
+        RUN [ "sh", "-x", "/tmp/scripts/jboss.container.util.pkg-update/execute.sh" ]
+###### /
+###### END module 'jboss.container.util.pkg-update:1.0'
+
+###### START module 'jboss.container.tar:1.0'
+###### \
+        # Switch to 'root' user for package management for 'jboss.container.tar' module defined packages
+        USER root
+        # Install packages defined in the 'jboss.container.tar' module
+        RUN microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install -y tar \
+            && microdnf clean all \
+            && rpm -q tar
+###### /
+###### END module 'jboss.container.tar:1.0'
+
+###### START module 'jboss.container.user:2.0'
+###### \
+        # Copy 'jboss.container.user' module content
+        COPY modules/jboss.container.user /tmp/scripts/jboss.container.user
+        # Switch to 'root' user for package management for 'jboss.container.user' module defined packages
+        USER root
+        # Install packages defined in the 'jboss.container.user' module
+        RUN microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install -y shadow-utils \
+            && microdnf clean all \
+            && rpm -q shadow-utils
+        # Set 'jboss.container.user' module defined environment variables
+        ENV \
+            GECOS="Default user" \
+            HOME="/home/default" \
+            UID="185" \
+            USER="default"
+        # Custom scripts from 'jboss.container.user' module
+        USER root
+        RUN [ "sh", "-x", "/tmp/scripts/jboss.container.user/configure.sh" ]
+###### /
+###### END module 'jboss.container.user:2.0'
+
+###### START module 'jboss.container.openjdk:0'
+###### \
+###### /
+###### END module 'jboss.container.openjdk:0'
+
+###### START module 'jboss.container.openjdk.jre:21'
+###### \
+        # Copy 'jboss.container.openjdk.jre' module content
+        COPY modules/jboss.container.openjdk.jre /tmp/scripts/jboss.container.openjdk.jre
+        # Switch to 'root' user for package management for 'jboss.container.openjdk.jre' module defined packages
+        USER root
+        # Install packages defined in the 'jboss.container.openjdk.jre' module
+        RUN microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install -y java-21-openjdk-headless \
+            && microdnf clean all \
+            && rpm -q java-21-openjdk-headless
+        # Set 'jboss.container.openjdk.jre' module defined environment variables
+        ENV \
+            JAVA_HOME="/usr/lib/jvm/jre" \
+            JAVA_VENDOR="openjdk" \
+            JAVA_VERSION="21" \
+            JBOSS_CONTAINER_OPENJDK_JRE_MODULE="/opt/jboss/container/openjdk/jre"
+        # Set 'jboss.container.openjdk.jre' module defined labels
+        LABEL \
+            org.jboss.product="openjdk" \
+            org.jboss.product.openjdk.version="21" \
+            org.jboss.product.version="21"
+        # Custom scripts from 'jboss.container.openjdk.jre' module
+        USER root
+        RUN [ "sh", "-x", "/tmp/scripts/jboss.container.openjdk.jre/configure.sh" ]
+###### /
+###### END module 'jboss.container.openjdk.jre:21'
+
+###### START module 'jboss.container.util.tzdata:1.0'
+###### \
+        # Copy 'jboss.container.util.tzdata' module content
+        COPY modules/jboss.container.util.tzdata /tmp/scripts/jboss.container.util.tzdata
+        # Custom scripts from 'jboss.container.util.tzdata' module
+        USER root
+        RUN [ "sh", "-x", "/tmp/scripts/jboss.container.util.tzdata/execute.sh" ]
+###### /
+###### END module 'jboss.container.util.tzdata:1.0'
+
+###### START module 'jboss.container.java.proxy:2.0'
+###### \
+        # Copy 'jboss.container.java.proxy' module content
+        COPY modules/jboss.container.java.proxy /tmp/scripts/jboss.container.java.proxy
+        # Set 'jboss.container.java.proxy' module defined environment variables
+        ENV \
+            JBOSS_CONTAINER_JAVA_PROXY_MODULE="/opt/jboss/container/java/proxy"
+        # Custom scripts from 'jboss.container.java.proxy' module
+        USER root
+        RUN [ "sh", "-x", "/tmp/scripts/jboss.container.java.proxy/configure.sh" ]
+###### /
+###### END module 'jboss.container.java.proxy:2.0'
+
+###### START module 'jboss.container.java.jvm:1.0'
+###### \
+        # Copy 'jboss.container.java.jvm' module content
+        COPY modules/jboss.container.java.jvm /tmp/scripts/jboss.container.java.jvm
+        # Set 'jboss.container.java.jvm' module defined environment variables
+        ENV \
+            JBOSS_CONTAINER_JAVA_JVM_MODULE="/opt/jboss/container/java/jvm"
+        # Custom scripts from 'jboss.container.java.jvm' module
+        USER root
+        RUN [ "sh", "-x", "/tmp/scripts/jboss.container.java.jvm/configure.sh" ]
+###### /
+###### END module 'jboss.container.java.jvm:1.0'
+
+###### START module 'jboss.container.util.logging:1.0'
+###### \
+        # Copy 'jboss.container.util.logging' module content
+        COPY modules/jboss.container.util.logging /tmp/scripts/jboss.container.util.logging
+        # Set 'jboss.container.util.logging' module defined environment variables
+        ENV \
+            JBOSS_CONTAINER_UTIL_LOGGING_MODULE="/opt/jboss/container/util/logging/"
+        # Custom scripts from 'jboss.container.util.logging' module
+        USER root
+        RUN [ "sh", "-x", "/tmp/scripts/jboss.container.util.logging/configure.sh" ]
+###### /
+###### END module 'jboss.container.util.logging:1.0'
+
+###### START module 'jboss.container.java.run:1.0'
+###### \
+        # Copy 'jboss.container.java.run' module content
+        COPY modules/jboss.container.java.run /tmp/scripts/jboss.container.java.run
+        # Set 'jboss.container.java.run' module defined environment variables
+        ENV \
+            JAVA_DATA_DIR="/deployments/data" \
+            JBOSS_CONTAINER_JAVA_RUN_MODULE="/opt/jboss/container/java/run"
+        # Custom scripts from 'jboss.container.java.run' module
+        USER root
+        RUN [ "sh", "-x", "/tmp/scripts/jboss.container.java.run/configure.sh" ]
+###### /
+###### END module 'jboss.container.java.run:1.0'
+
+###### START module 'jboss.container.java.jre.run:1.0'
+###### \
+###### /
+###### END module 'jboss.container.java.jre.run:1.0'
+
+###### START image 'ubi9/openjdk-21-runtime:1.24'
+###### \
+        # Set 'ubi9/openjdk-21-runtime' image defined environment variables
+        ENV \
+            JBOSS_IMAGE_NAME="ubi9/openjdk-21-runtime" \
+            JBOSS_IMAGE_VERSION="1.24" \
+            LANG="C.utf8"
+        # Set 'ubi9/openjdk-21-runtime' image defined labels
+        LABEL \
+            com.redhat.component="openjdk-21-runtime-ubi9-container" \
+            com.redhat.license_terms="https://www.redhat.com/en/about/red-hat-end-user-license-agreements#UBI" \
+            description="Image for Red Hat OpenShift providing OpenJDK 21 runtime" \
+            io.cekit.version="4.13.0.dev0" \
+            io.k8s.description="Platform for running plain Java applications (fat-jar and flat classpath)" \
+            io.k8s.display-name="Java Applications" \
+            io.openshift.tags="java" \
+            maintainer="Red Hat OpenJDK <openjdk@redhat.com>" \
+            name="ubi9/openjdk-21-runtime" \
+            org.opencontainers.image.documentation="https://rh-openjdk.github.io/redhat-openjdk-containers/" \
+            org.opencontainers.image.revision="ubi9" \
+            org.opencontainers.image.source="https://github.com/rh-openjdk/redhat-openjdk-containers" \
+            summary="Image for Red Hat OpenShift providing OpenJDK 21 runtime" \
+            usage="https://rh-openjdk.github.io/redhat-openjdk-containers/" \
+            version="1.24"
+        # Exposed ports in 'ubi9/openjdk-21-runtime' image
+        EXPOSE 8080 8443
+###### /
+###### END image 'ubi9/openjdk-21-runtime:1.24'
+
+
+
+    # Switch to 'root' user and remove artifacts and modules
+    USER root
+    RUN rm -rf "/tmp/scripts" "/tmp/artifacts"
+    # Clear package manager metadata
+    RUN rm -rf "/var/cache/yum" "/var/lib/dnf" "/var/cache/apt" "/var/cache/dnf"
+
+    # Define the user
+    USER 185
+    # Define the working directory
+    WORKDIR /home/default
+    # Define run cmd
+    CMD ["/opt/jboss/container/java/run/run-java.sh"]
+## /
+## END target image
+COPY help.1 /help.1
+COPY openjdk-21-runtime-ubi9-container-1.24-3.1788862450.json /root/buildinfo/content_manifests/openjdk-21-runtime-ubi9-container-1.24-3.1788862450.json
+LABEL "release"="3.1788862450" "distribution-scope"="public" "vendor"="Red Hat, Inc." "build-date"="2026-09-08T10:14:35" "architecture"="aarch64" "vcs-type"="git" "vcs-ref"="f74d5e7c1c24af798478dbc512f9ddf0ffc4c411" "url"="https://access.redhat.com/containers/#/registry.access.redhat.com/ubi9/openjdk-21-runtime/images/1.24-3.1788862450"

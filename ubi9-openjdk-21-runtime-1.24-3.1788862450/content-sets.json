@@ -1,0 +1,26 @@
+{
+  "content_sets": [
+    "rhel-9-for-aarch64-appstream-rpms",
+    "rhel-9-for-aarch64-appstream-source-rpms",
+    "rhel-9-for-aarch64-baseos-rpms",
+    "rhel-9-for-aarch64-baseos-source-rpms",
+    "rhel-9-for-ppc64le-appstream-rpms",
+    "rhel-9-for-ppc64le-appstream-source-rpms",
+    "rhel-9-for-ppc64le-baseos-rpms",
+    "rhel-9-for-ppc64le-baseos-source-rpms",
+    "rhel-9-for-s390x-appstream-rpms",
+    "rhel-9-for-s390x-appstream-source-rpms",
+    "rhel-9-for-s390x-baseos-rpms",
+    "rhel-9-for-s390x-baseos-source-rpms",
+    "rhel-9-for-x86_64-appstream-rpms",
+    "rhel-9-for-x86_64-appstream-source-rpms",
+    "rhel-9-for-x86_64-baseos-rpms",
+    "rhel-9-for-x86_64-baseos-source-rpms"
+  ],
+  "from_dnf_hint": true,
+  "metadata": {
+    "icm_spec": "https://raw.githubusercontent.com/containerbuildsystem/atomic-reactor/master/atomic_reactor/schemas/content_manifest.json",
+    "icm_version": 1,
+    "image_layer_index": 0
+  }
+}
